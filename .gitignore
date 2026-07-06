@@ -1,0 +1,23 @@
+# Entorno virtual
+venv/
+.venv/
+
+# Secretos
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Base vectorial generada localmente (se recrea al iniciar)
+data/chroma_db/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+Thumbs.db
+.DS_Store
