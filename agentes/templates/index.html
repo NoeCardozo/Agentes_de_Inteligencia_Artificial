@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html data-theme="corporate">
+
+<head>
+    <title>AI Agent</title>
+    <!-- Tailwind -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+
+    <!-- daisyUI -->
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
+</head>
+
+<body class="p-4">
+    <div class="container mx-auto">
+        {% for message in messages %}
+        {% if message.type == 'human' %}
+        <div class="chat chat-end">
+            <div class="chat-image avatar"><img src="/static/user.png" class="w-10" /></div>
+            <div class="chat-bubble chat-bubble-primary">{{ message.content }}</div>
+        </div>
+        {% elif message.type == 'ai' %}
+        <div class="chat chat-start">
+            <div class="chat-image avatar"><img src="/static/bot.png" class="w-10" /></div>
+            <div class="chat-bubble chat-bubble-accent">{{ message.content }}</div>
+            <div class="chat-footer opacity-50">{{ message.total_tokens }} tokens</div>
+        </div>
+        {% else %}
+        <div class="chat chat-start">
+            <div class="chat-image avatar"><img src="/static/tool.png" class="w-10" /></div>
+            <div class="chat-bubble chat-bubble-secondary">{{ message.content }}</div>
+        </div>
+        {% endif %}
+        {% endfor %}
+
+        <form action="/" method="POST" id="form" class="mt-8 flex flex-col space-y-2 mx-auto">
+            <div class="flex space-x-2">
+                <input type="hidden" name="thread_id" value="{{ thread_id }}" />
+                <input type="text" class="p-2 border border-gray-500 w-full" name="user_input"
+                    placeholder="Pregunta al agente..." />
+                <input type="submit" class="btn btn-secondary" value="Enviar" name="send_button" />
+                <input type="submit" class="btn btn-info btn-outline" value="Resetear" name="reset_button" />
+            </div>
+        </form>
+    </div>
+</body>
+
+</html>

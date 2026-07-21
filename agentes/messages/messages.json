@@ -1,0 +1,58 @@
+[
+  {
+    "type": "human",
+    "content": "hola, soy Roberto"
+  },
+  {
+    "type": "tool",
+    "content": "Updated file /memories/profile.md"
+  },
+  {
+    "type": "ai",
+    "content": "\u00a1Hola, Roberto! Encantado de conocerte. He guardado tu nombre en mi memoria. \u00bfEn qu\u00e9 puedo ayudarte hoy?",
+    "total_tokens": 7317
+  },
+  {
+    "type": "human",
+    "content": "hola, soy Roberto"
+  },
+  {
+    "type": "human",
+    "content": "hola, soy Roberto"
+  },
+  {
+    "type": "human",
+    "content": "hola, soy Roberto"
+  },
+  {
+    "type": "human",
+    "content": "hola"
+  },
+  {
+    "type": "ai",
+    "content": "\u00a1Hola, Roberto! \u00bfC\u00f3mo puedo ayudarte hoy?",
+    "total_tokens": 7312
+  },
+  {
+    "type": "human",
+    "content": "voy al supermercado Dia"
+  },
+  {
+    "type": "ai",
+    "content": "Ok.",
+    "total_tokens": 7299
+  },
+  {
+    "type": "human",
+    "content": "tamb\u00eden al carrefour"
+  },
+  {
+    "type": "tool",
+    "content": "Successfully replaced 1 instance(s) of the string in '/memories/profile.md'"
+  },
+  {
+    "type": "ai",
+    "content": "\u00a1Entendido! He a\u00f1adido Carrefour a tus intereses en mi memoria. \u00bfHay algo m\u00e1s en lo que pueda ayudarte?",
+    "total_tokens": 7352
+  }
+]
