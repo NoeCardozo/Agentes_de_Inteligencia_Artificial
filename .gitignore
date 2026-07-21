@@ -1,0 +1,41 @@
+# Entorno y secretos
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+# Datos locales / índices
+data/chroma/
+data/memory/
+*.db
+*.sqlite3
+
+# IDE / OS
+.idea/
+.vscode/
+.cursor/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Tests / cobertura
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Artefacto erróneo de expansión de shell en Windows
+\{agents,rag,memory,mcp,skills,guardrails,evaluation,data,config\}/
+
+data/memory/*.json
