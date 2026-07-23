@@ -114,6 +114,30 @@ def is_conversation_followup(text: str) -> bool:
     return any(m in lower for m in markers)
 
 
+def is_trip_detail_reply(text: str) -> bool:
+    """
+    True si el mensaje aporta datos de un viaje en curso
+    (fechas, duración, presupuesto, acompañantes), aunque no nombre el destino.
+    """
+    lower = (text or "").lower()
+    if not lower.strip():
+        return False
+    markers = [
+        "día", "dias", "días", "presupuesto", "millones", "mil pesos", "pesos",
+        "ars", "viajo", "viajaré", "viajare", "viajamos", "iré", "ire",
+        "persona", "personas", "viajero", "viajeros",
+        "novio", "novia", "pareja", "familia", "amigo", "amigos",
+        "diciembre", "diciemnre", "enero", "febrero", "marzo", "abril", "mayo",
+        "junio", "julio", "agosto", "septiembre", "octubre", "noviembre",
+        "fecha", "fechas", "mediados", "fines de", "fin de semana", "semana",
+        "alojamiento", "hotel", "vuelo", "bus",
+    ]
+    if any(m in lower for m in markers):
+        return True
+    # Menciona un destino conocido
+    return bool(extract_destination(text))
+
+
 def has_active_trip_session(session: dict | None) -> bool:
     if not session:
         return False

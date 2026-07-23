@@ -8,13 +8,14 @@ from typing import Tuple
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from config.settings import ORCHESTRATOR_MODEL, GOOGLE_API_KEY, DOMAIN_DESCRIPTION
-from agents.utils import to_text, is_conversation_followup
+from agents.utils import to_text, is_conversation_followup, is_trip_detail_reply
 
 # ── 1. Palabras inapropiadas ──────────────────────────────────────────────────
 # Lista representativa; ampliar según necesidad.
+# Nota: no incluir "ass" (falso positivo en palabras en español / nombres).
 BAD_WORDS = {
     "mierda", "puta", "hijo de puta", "pelotudo", "boludo", "concha",
-    "carajo", "fuck", "shit", "ass", "bastard", "cunt", "damn",
+    "carajo", "fuck", "shit", "bastard", "cunt", "damn",
 }
 
 def check_bad_words(text: str) -> Tuple[bool, str]:
@@ -70,24 +71,47 @@ def _get_domain_llm():
     return _domain_llm
 
 
-def check_domain(user_message: str, has_active_session: bool = False) -> Tuple[bool, str]:
+def check_domain(
+    user_message: str,
+    has_active_session: bool = False,
+    conversation_context: str = "",
+) -> Tuple[bool, str]:
     """
     Verifica si la consulta está dentro del dominio de turismo argentino.
     Retorna (True, "") si está en dominio, (False, motivo) si no.
     """
-    # Seguimientos cortos de una conversación de viaje ya abierta
-    if has_active_session and is_conversation_followup(user_message):
+    # Seguimientos de una conversación de viaje ya abierta
+    if has_active_session and (
+        is_conversation_followup(user_message) or is_trip_detail_reply(user_message)
+    ):
         return True, ""
 
     llm = _get_domain_llm()
+    context_block = ""
+    if conversation_context.strip():
+        context_block = (
+            f"\n\nCONTEXTO RECIENTE DE LA CONVERSACIÓN:\n{conversation_context.strip()}\n"
+        )
+    session_hint = ""
+    if has_active_session:
+        session_hint = (
+            " Ya hay una conversación de viaje en curso: si el mensaje aporta fechas, "
+            "presupuesto, duración, acompañantes o confirma datos del viaje, respondé SI "
+            "aunque no mencione Argentina ni el destino otra vez."
+        )
     system = SystemMessage(content=(
         "Eres un clasificador de consultas. Tu única tarea es determinar si "
         f"la consulta del usuario está relacionada con {DOMAIN_DESCRIPTION}, "
         "incluyendo seguimientos de una planificación en curso "
-        "(elegir una opción de fechas, confirmar un período, pedir itinerario). "
+        "(elegir una opción de fechas, confirmar un período, pedir itinerario, "
+        "indicar presupuesto, días, viajeros o preferencias)."
+        f"{session_hint} "
         "Responde ÚNICAMENTE con 'SI' o 'NO', sin ninguna otra palabra."
     ))
-    human = HumanMessage(content=user_message)
+    human = HumanMessage(content=(
+        f"{context_block}"
+        f"MENSAJE DEL USUARIO:\n{user_message}"
+    ))
     result = llm.invoke([system, human])
     answer = to_text(result.content).strip().upper()
     if "SI" in answer[:10]:
@@ -168,6 +192,7 @@ def check_weather_alert(rain_mm: float, threshold_mm: float) -> Tuple[bool, str]
 def apply_input_guardrails(
     user_message: str,
     has_active_session: bool = False,
+    conversation_context: str = "",
 ) -> Tuple[bool, str]:
     """
     Corre todos los chequeos de entrada en orden.
@@ -178,13 +203,20 @@ def apply_input_guardrails(
     if not ok:
         return False, "Por favor, utilizá un lenguaje respetuoso. Estoy aquí para ayudarte con tu viaje por Argentina."
 
-    # 2. Idioma (omitir en seguimientos cortos: "opción 2", "dale", etc.)
-    if not (has_active_session and is_conversation_followup(user_message)):
+    # 2. Idioma (omitir en seguimientos / datos de viaje en curso)
+    skip_lang = has_active_session and (
+        is_conversation_followup(user_message) or is_trip_detail_reply(user_message)
+    )
+    if not skip_lang:
         if detect_non_spanish(user_message):
             return False, SPANISH_RESPONSE
 
     # 3. Dominio
-    ok, msg = check_domain(user_message, has_active_session=has_active_session)
+    ok, msg = check_domain(
+        user_message,
+        has_active_session=has_active_session,
+        conversation_context=conversation_context,
+    )
     if not ok:
         return False, msg
 

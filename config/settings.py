@@ -40,6 +40,19 @@ USE_REAL_ATTRACTIONS = os.getenv("USE_REAL_ATTRACTIONS", "true").lower() in {"1"
 USE_REAL_FLIGHTS     = os.getenv("USE_REAL_FLIGHTS", "true").lower() in {"1", "true", "yes"}
 TRAVELPAYOUTS_TOKEN  = os.getenv("TRAVELPAYOUTS_TOKEN", "")
 
+# ── Gmail + Google Calendar (OAuth) ───────────────────────────────────────────
+GOOGLE_OAUTH_CLIENT_SECRETS = os.getenv(
+    "GOOGLE_OAUTH_CLIENT_SECRETS", "./credentials/credentials.json"
+)
+GOOGLE_OAUTH_TOKEN = os.getenv("GOOGLE_OAUTH_TOKEN", "./credentials/token.json")
+USER_EMAIL = os.getenv("USER_EMAIL", "")  # destinatario por defecto del itinerario
+GOOGLE_CALENDAR_ID = os.getenv("GOOGLE_CALENDAR_ID", "primary")
+GOOGLE_CALENDAR_TZ = os.getenv("GOOGLE_CALENDAR_TZ", "America/Argentina/Buenos_Aires")
+# Al aprobar HITL: enviar email + crear eventos automáticamente
+AUTO_DELIVER_ON_APPROVE = os.getenv("AUTO_DELIVER_ON_APPROVE", "true").lower() in {
+    "1", "true", "yes",
+}
+
 # ── Idioma y dominio ──────────────────────────────────────────────────────────
 AGENT_LANGUAGE       = "español"
 DOMAIN_DESCRIPTION   = "turismo y viajes dentro de Argentina"

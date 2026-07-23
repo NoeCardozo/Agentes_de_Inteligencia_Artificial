@@ -1,2 +1,0 @@
-- Nombre: Roberto
-- Interés: Carrefour

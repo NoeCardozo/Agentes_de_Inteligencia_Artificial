@@ -39,3 +39,13 @@ htmlcov/
 \{agents,rag,memory,mcp,skills,guardrails,evaluation,data,config\}/
 
 data/memory/*.json
+
+# Chat Flask (runtime)
+agentes/messages/messages.json
+agentes/messages/hitl_meta.json
+
+# Google OAuth secrets
+credentials/credentials.json
+credentials/token.json
+credentials/*.json
+!credentials/.gitignore

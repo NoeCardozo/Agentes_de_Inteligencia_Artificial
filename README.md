@@ -1,80 +1,69 @@
 # Agente de Turismo Argentina
-### LangChain + LangGraph · RAG avanzado · Subagentes · Human in the Loop
+### Deep Agent (web) · LangGraph (CLI) · RAG · MCP · Human in the Loop
 
 ---
 
 ## Arquitectura
 
+### Frontend web (recomendado)
+
 ```
-Usuario
+Usuario (chat Flask)
   │
   ▼
-[Guardarraíl de entrada]  ← dominio, idioma, malas palabras
+[Guardarraíl de entrada]
   │
   ▼
-[Orquestador LangGraph]
-  ├── Subagente Destinos    → tool_clima, tool_actividades
-  ├── Subagente Itinerario  → tool_actividades, tool_alojamiento, tool_traslados
-  ├── Subagente Precios     → tool_alojamiento, tool_traslados
-  ├── Subagente Monitoreo   → tool_clima, tool_actividades
-  └── Subagente RAG         → pipeline RAG completo
-        ├── Fragmentación (RecursiveCharacterTextSplitter)
-        ├── Query rewriting
-        ├── Descomposición en subconsultas
-        ├── Retrieval híbrido (semántica + BM25)
-        ├── Fusión RRF
-        └── Re-ranking cross-encoder
+[Deep Agent — orquestador]
+  ├── Tools MCP (clima, alojamiento, actividades, traslados, gestión)
+  ├── Tool RAG
+  ├── Tools Gmail + Google Calendar
+  ├── Skills (/skills/*.md)
+  ├── Subagentes (destinos, itinerario, precios, monitoreo)
+  └── Memoria (/memories/profile.md)
   │
   ▼
-[Subagente Juez + Rúbrica]  ← modelo diferente (gpt-4o-mini)
-  │  ├── coherencia temporal
-  │  ├── ajuste presupuesto
-  │  ├── relevancia perfil
-  │  ├── corrección política
-  │  ├── idioma español
-  │  └── fidelidad dominio
-  │
-  ├── rechaza → vuelve al orquestador (máx. 2 retries)
+[Juez + rúbrica]
   │
   ▼
-[Human in the Loop]  ← decisión final siempre del usuario
-  │
-  ▼
-[Memoria a largo plazo]  ← guarda itinerario, perfil, feedback
-  │
+[HITL en UI]  Aprobar · Regenerar · Escalar
+  │  (Aprobar → email del itinerario + eventos en Calendar)
   ▼
 Respuesta final
 ```
+
+### CLI (LangGraph)
+
+El grafo en `agents/graph.py` sigue disponible vía `python main.py` (interactivo / demo / eval).
 
 ---
 
 ## Estructura de archivos
 
 ```
-agente_turismo/
+tp-agent/
+├── agentes/                 # Frontend Flask + Deep Agent
+│   ├── app.py               # Orquestador web (tools, skills, HITL)
+│   ├── skills/              # SKILL.md (planificacion, monitoreo, precios)
+│   ├── memories/            # Perfil persistente del viajero
+│   ├── messages/            # Historial del chat
+│   ├── templates/           # UI del chat
+│   └── static/
 ├── config/
-│   └── settings.py          # Configuración central y variables de entorno
 ├── guardrails/
-│   └── guardrails.py        # Guardarraíles: dominio, idioma, malas palabras, presupuesto
 ├── rag/
-│   └── rag_pipeline.py      # Pipeline RAG completo (6 etapas)
 ├── memory/
-│   └── long_term_memory.py  # Memoria persistente por usuario
 ├── mcp/
-│   ├── mcp_server.py        # Servidor MCP (FastAPI)
-│   └── mcp_client.py        # Tools LangChain que consumen el servidor
-├── skills/
-│   └── skills.py            # Skills procedurales versionadas
-├── agents/
-│   ├── subagents.py         # 5 subagentes especializados
-│   ├── judge_agent.py       # Subagente juez con rúbrica
-│   └── graph.py             # Grafo LangGraph (orquestador principal)
+├── skills/                  # Skills embebidas (CLI / legado)
+├── agents/                  # Grafo LangGraph CLI + juez + utils
 ├── evaluation/
-│   └── evaluator.py         # Métricas y batería adversarial
+├── integrations/            # Gmail + Google Calendar (OAuth)
+├── credentials/             # credentials.json + token.json (no versionar)
+├── scripts/
+│   └── google_oauth_setup.py
 ├── data/
-│   └── sample_docs.py       # Documentos de ejemplo para el RAG
-├── main.py                  # Punto de entrada
-├── setup.py                 # Inicialización del vector store
+├── main.py                  # CLI
+├── setup.py
 ├── requirements.txt
 └── .env.example
 ```
@@ -85,7 +74,7 @@ agente_turismo/
 
 ```bash
 # 1. Clonar / copiar el proyecto
-cd agente_turismo
+cd tp-agent
 
 # 2. Crear entorno virtual
 python -m venv venv
@@ -97,20 +86,40 @@ pip install -r requirements.txt
 
 # 4. Configurar variables de entorno
 cp .env.example .env
-# Editar .env y agregar tu GOOGLE_API_KEY
-# GEMINI_MODEL=gemini-2.5-flash
+# Editar .env: GOOGLE_API_KEY, USER_EMAIL, etc.
 
 # 5. Inicializar el vector store RAG
 python setup.py
 
-# 6. En una terminal separada, levantar el servidor MCP
+# 6. (Opcional pero recomendado) Gmail + Google Calendar
+#    - Google Cloud Console → habilitar Gmail API y Google Calendar API
+#    - OAuth consent screen + usuario de prueba
+#    - Credenciales → OAuth client ID → Desktop → descargar JSON
+#    - Guardar como credentials/credentials.json
+#    - Autorizar una vez:
+python scripts/google_oauth_setup.py
+
+# 7. En una terminal separada, levantar el servidor MCP
 uvicorn mcp.mcp_server:app --port 8001
 
-# 7. Correr el agente
-python main.py --demo          # ejemplo predefinido
-python main.py                 # modo interactivo
-python main.py --eval          # evaluación de guardarraíles
+# 8. Frontend web (Deep Agent + chat)
+python agentes/app.py
+# Abrir http://127.0.0.1:5000
+
+# Alternativa CLI (LangGraph)
+python main.py --demo
+python main.py
+python main.py --eval
 ```
+
+### Flujo email + calendario
+
+1. Pedís un itinerario en el chat (destino, fechas, presupuesto).
+2. El agente arma el plan y deja un draft con evaluación del juez.
+3. Apretás **Aprobar** → si `AUTO_DELIVER_ON_APPROVE=true` y OAuth está listo:
+   - envía el itinerario a `USER_EMAIL` por Gmail
+   - crea los eventos en Google Calendar (`GOOGLE_CALENDAR_ID`, default `primary`)
+4. También podés pedirle en el chat: “enviámelo por mail y cargalo al calendario” (tools `tool_enviar_email` / `tool_crear_eventos_calendario`).
 
 ---
 
@@ -132,6 +141,8 @@ python main.py --eval          # evaluación de guardarraíles
 | Precios | alojamiento, traslados | Optimización de presupuesto |
 | Monitoreo | clima, actividades | Alertas y planes alternativos |
 | Juez | — | Evaluación con rúbrica (modelo diferente) |
+
+En el chat web, estos subagentes se exponen vía Deep Agent (`task` / `subagents=`). El HITL se resuelve con botones **Aprobar / Regenerar / Escalar** en la UI.
 
 ### Guardarraíles
 - **Dominio**: rechaza consultas fuera del turismo argentino
@@ -163,3 +174,8 @@ python main.py --eval          # evaluación de guardarraíles
 | `MAX_JUDGE_RETRIES` | `2` | Máximo de reintentos antes de escalar al humano |
 | `RAIN_ALERT_MM` | `20.0` | Umbral de lluvia para alerta climática |
 | `MCP_HOST` | `http://localhost:8001` | URL del servidor MCP |
+| `USER_EMAIL` | — | Email destino de itinerarios |
+| `GOOGLE_OAUTH_CLIENT_SECRETS` | `./credentials/credentials.json` | Cliente OAuth Desktop |
+| `GOOGLE_OAUTH_TOKEN` | `./credentials/token.json` | Token tras `google_oauth_setup.py` |
+| `GOOGLE_CALENDAR_ID` | `primary` | Calendario donde crear eventos |
+| `AUTO_DELIVER_ON_APPROVE` | `true` | Al aprobar HITL: email + Calendar |

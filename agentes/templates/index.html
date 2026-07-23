@@ -2,48 +2,177 @@
 <html data-theme="corporate">
 
 <head>
-    <title>AI Agent</title>
-    <!-- Tailwind -->
+    <title>Agente de Turismo Argentina</title>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-
-    <!-- daisyUI -->
     <link href="https://cdn.jsdelivr.net/npm/daisyui@5" rel="stylesheet" type="text/css" />
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link href="https://cdn.jsdelivr.net/npm/daisyui@5/themes.css" rel="stylesheet" type="text/css" />
+    <style>
+        .markdown-bubble {
+            max-width: 100%;
+        }
+        .markdown-bubble p {
+            margin: 0.4em 0;
+        }
+        .markdown-bubble p:first-child {
+            margin-top: 0;
+        }
+        .markdown-bubble p:last-child {
+            margin-bottom: 0;
+        }
+        .markdown-bubble ul,
+        .markdown-bubble ol {
+            margin: 0.4em 0 0.4em 1.2em;
+            padding: 0;
+        }
+        .markdown-bubble li {
+            margin: 0.15em 0;
+        }
+        .markdown-bubble strong {
+            font-weight: 700;
+        }
+        .markdown-bubble h1,
+        .markdown-bubble h2,
+        .markdown-bubble h3 {
+            font-weight: 700;
+            margin: 0.5em 0 0.25em;
+            line-height: 1.3;
+        }
+        .markdown-bubble code {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        .markdown-bubble pre {
+            overflow-x: auto;
+            margin: 0.5em 0;
+            padding: 0.5em;
+            border-radius: 0.4em;
+            background: rgba(0, 0, 0, 0.08);
+        }
+        #user_input {
+            resize: none;
+            overflow-y: hidden;
+            min-height: 2.75rem;
+            max-height: 12rem;
+            line-height: 1.4;
+            field-sizing: content;
+        }
+    </style>
 </head>
 
 <body class="p-4">
-    <div class="container mx-auto">
+    <div class="container mx-auto max-w-3xl">
+        <header class="mb-6">
+            <h1 class="text-2xl font-bold">Agente de Turismo Argentina</h1>
+            <p class="opacity-70 text-sm">Deep Agent · RAG · MCP · Human in the Loop</p>
+        </header>
+
+        {% if form_error %}
+        <div class="alert alert-warning mb-4">{{ form_error }}</div>
+        {% endif %}
+
         {% for message in messages %}
         {% if message.type == 'human' %}
         <div class="chat chat-end">
-            <div class="chat-image avatar"><img src="/static/user.png" class="w-10" /></div>
-            <div class="chat-bubble chat-bubble-primary">{{ message.content }}</div>
+            <div class="chat-image avatar"><img src="/static/user.png" class="w-10" alt="usuario" /></div>
+            <div class="chat-bubble chat-bubble-primary whitespace-pre-wrap">{{ message.content }}</div>
         </div>
         {% elif message.type == 'ai' %}
         <div class="chat chat-start">
-            <div class="chat-image avatar"><img src="/static/bot.png" class="w-10" /></div>
-            <div class="chat-bubble chat-bubble-accent">{{ message.content }}</div>
-            <div class="chat-footer opacity-50">{{ message.total_tokens }} tokens</div>
+            <div class="chat-image avatar"><img src="/static/bot.png" class="w-10" alt="agente" /></div>
+            <div class="chat-bubble chat-bubble-accent markdown-bubble">{{ message.content | markdown }}</div>
+            <div class="chat-footer opacity-50 flex flex-wrap gap-2">
+                {% if message.total_tokens %}
+                <span>{{ message.total_tokens }} tokens</span>
+                {% endif %}
+                {% if message.status == 'pending_hitl' %}
+                <span class="badge badge-warning badge-sm">Pendiente de aprobación</span>
+                {% elif message.status == 'approved' %}
+                <span class="badge badge-success badge-sm">Aprobado</span>
+                {% elif message.status == 'escalated' %}
+                <span class="badge badge-error badge-sm">Escalado</span>
+                {% elif message.status == 'superseded' %}
+                <span class="badge badge-ghost badge-sm">Reemplazado</span>
+                {% elif message.status == 'blocked' %}
+                <span class="badge badge-error badge-sm">Bloqueado</span>
+                {% endif %}
+            </div>
+            {% if message.status == 'pending_hitl' and message.judge_summary %}
+            <div class="mt-2 ml-12 p-3 bg-base-200 rounded text-sm whitespace-pre-wrap opacity-90">
+                {{ message.judge_summary }}
+            </div>
+            {% endif %}
         </div>
         {% else %}
+        {% if show_tool_messages %}
         <div class="chat chat-start">
-            <div class="chat-image avatar"><img src="/static/tool.png" class="w-10" /></div>
-            <div class="chat-bubble chat-bubble-secondary">{{ message.content }}</div>
+            <div class="chat-image avatar"><img src="/static/tool.png" class="w-10" alt="tool" /></div>
+            <div class="chat-bubble chat-bubble-secondary whitespace-pre-wrap text-sm">{{ message.content }}</div>
         </div>
+        {% endif %}
         {% endif %}
         {% endfor %}
 
-        <form action="/" method="POST" id="form" class="mt-8 flex flex-col space-y-2 mx-auto">
-            <div class="flex space-x-2">
-                <input type="hidden" name="thread_id" value="{{ thread_id }}" />
-                <input type="text" class="p-2 border border-gray-500 w-full" name="user_input"
-                    placeholder="Pregunta al agente..." />
-                <input type="submit" class="btn btn-secondary" value="Enviar" name="send_button" />
-                <input type="submit" class="btn btn-info btn-outline" value="Resetear" name="reset_button" />
+        {% if pending_hitl %}
+        <form action="/" method="POST" class="mt-6 p-4 border border-warning rounded-lg bg-base-200">
+            <input type="hidden" name="thread_id" value="{{ thread_id }}" />
+            <p class="font-semibold mb-2">Human in the Loop — decisión requerida</p>
+            <p class="text-sm opacity-80 mb-3">
+                Regeneraciones usadas: {{ judge_retries }} / {{ max_retries }}.
+                Este panel aparece solo cuando hay un itinerario/plan para revisar.
+                Al <strong>Aprobar</strong> se envía por email y se crean eventos en Google Calendar (si OAuth está configurado).
+            </p>
+            <div class="flex flex-wrap gap-2">
+                <input type="submit" class="btn btn-success" value="Aprobar" name="hitl_approve" />
+                <input type="submit" class="btn btn-warning" value="Regenerar" name="hitl_regenerate" />
+                <input type="submit" class="btn btn-error btn-outline" value="Escalar" name="hitl_escalate" />
             </div>
         </form>
+        {% endif %}
+
+        <form action="/" method="POST" id="form" class="mt-8 flex flex-col space-y-2 mx-auto">
+            <div class="flex space-x-2 items-end">
+                <input type="hidden" name="thread_id" value="{{ thread_id }}" />
+                <textarea id="user_input" name="user_input" rows="1"
+                    class="p-2 border border-gray-500 w-full rounded"
+                    placeholder="{% if pending_hitl %}Aprobá o regenerá la respuesta pendiente...{% else %}Preguntá sobre tu viaje por Argentina...{% endif %}"
+                    {% if pending_hitl %}disabled{% endif %}></textarea>
+                <input type="submit" class="btn btn-secondary shrink-0" value="Enviar" name="send_button"
+                    {% if pending_hitl %}disabled{% endif %} />
+                <input type="submit" class="btn btn-info btn-outline shrink-0" value="Resetear" name="reset_button" />
+            </div>
+            <label class="label cursor-pointer justify-start gap-2">
+                <input type="checkbox" class="checkbox checkbox-sm" name="show_tool_messages" value="1"
+                    {% if show_tool_messages %}checked{% endif %} />
+                <span class="label-text text-sm">Mostrar mensajes de tools</span>
+            </label>
+        </form>
     </div>
+    <script>
+        (function () {
+            const el = document.getElementById("user_input");
+            if (!el) return;
+
+            function autoGrow() {
+                el.style.height = "auto";
+                const next = Math.min(el.scrollHeight, 192); // ~12rem
+                el.style.height = next + "px";
+                el.style.overflowY = el.scrollHeight > 192 ? "auto" : "hidden";
+            }
+
+            el.addEventListener("input", autoGrow);
+            // Enter envía; Shift+Enter inserta salto de línea
+            el.addEventListener("keydown", function (e) {
+                if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!el.disabled && el.value.trim()) {
+                        el.form.requestSubmit(el.form.querySelector('[name="send_button"]'));
+                    }
+                }
+            });
+            autoGrow();
+            el.focus();
+        })();
+    </script>
 </body>
 
 </html>
