@@ -118,8 +118,10 @@
             <p class="font-semibold mb-2">Human in the Loop — decisión requerida</p>
             <p class="text-sm opacity-80 mb-3">
                 Regeneraciones usadas: {{ judge_retries }} / {{ max_retries }}.
-                Este panel aparece solo cuando hay un itinerario/plan para revisar.
-                Al <strong>Aprobar</strong> se envía por email y se crean eventos en Google Calendar (si OAuth está configurado).
+                Este panel aparece solo cuando hay un itinerario día a día para revisar.
+                Al <strong>Aprobar</strong>: se crean eventos en Google Calendar (cuenta OAuth)
+                y el itinerario se envía por email a la dirección que indiques en el chat.
+                Si todavía no diste un email, después de aprobar pedíselo escribiéndolo en el chat.
             </p>
             <div class="flex flex-wrap gap-2">
                 <input type="submit" class="btn btn-success" value="Aprobar" name="hitl_approve" />

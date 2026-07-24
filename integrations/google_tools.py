@@ -1,44 +1,58 @@
-"""Tools LangChain para Gmail y Google Calendar."""
+"""Tools LangChain para envío de email (Resend) y Google Calendar."""
 from __future__ import annotations
 
 import json
+import re
 
 from langchain_core.tools import tool
 
-from config.settings import USER_EMAIL
 from integrations.email_format import itinerary_to_email_html, polish_agent_reply
 from integrations.google_workspace import (
     create_calendar_events,
     oauth_configured,
+)
+from integrations.resend_email import (
+    is_valid_email,
+    resend_configured,
     send_email,
 )
+
+_DAY1_IN_BODY = re.compile(r"(?im)(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*\*)?d[ií]a\s*1\b")
 
 
 @tool
 def tool_enviar_email(to: str, subject: str, body: str) -> str:
     """
-    Envía un correo electrónico con el itinerario u otra información del viaje.
-    Parámetros: to (email destino), subject (asunto), body (itinerario en texto/markdown).
-    Si to está vacío, usa USER_EMAIL configurado en el entorno.
+    Envía por email el itinerario de turismo a la dirección que indicó el usuario.
+    Parámetros: to (email destino OBLIGATORIO indicado por el usuario),
+    subject (asunto), body (itinerario COMPLETO en texto/markdown, con Día 1…).
+    No uses un email inventado ni uno por defecto: si el usuario no dio email, pedíselo.
     """
-    if not oauth_configured():
+    if not resend_configured():
         return (
-            "Google OAuth no configurado. Colocá credentials/credentials.json "
-            "y ejecutá: python scripts/google_oauth_setup.py"
+            "Envío de email no configurado. Definí RESEND_API_KEY y RESEND_FROM en .env "
+            "(ver https://resend.com)."
         )
-    dest = (to or "").strip() or (USER_EMAIL or "").strip()
+    dest = (to or "").strip()
     if not dest:
         return (
-            "No hay destinatario. Pedile al usuario su email o configurá USER_EMAIL en .env."
+            "No hay destinatario. Preguntá al usuario: "
+            "'¿A qué email querés que te envíe el itinerario?'"
+        )
+    if not is_valid_email(dest):
+        return f"El email '{dest}' no es válido. Pedile al usuario una dirección correcta."
+    polished = polish_agent_reply(body or "")
+    if not _DAY1_IN_BODY.search(polished):
+        return (
+            "No envié el email: el body no parece un itinerario día a día "
+            "(falta 'Día 1'). Generá primero el plan completo y reintentá."
         )
     try:
-        polished = polish_agent_reply(body)
         html_body = itinerary_to_email_html(polished)
         result = send_email(
             dest,
             subject.strip() or "Tu itinerario de viaje — Agente Turismo Argentina",
             html_body,
-            html=True,
         )
         return f"Email enviado a {result['to']} (id={result['id']})."
     except Exception as exc:

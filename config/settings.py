@@ -40,7 +40,13 @@ USE_REAL_ATTRACTIONS = os.getenv("USE_REAL_ATTRACTIONS", "true").lower() in {"1"
 USE_REAL_FLIGHTS     = os.getenv("USE_REAL_FLIGHTS", "true").lower() in {"1", "true", "yes"}
 TRAVELPAYOUTS_TOKEN  = os.getenv("TRAVELPAYOUTS_TOKEN", "")
 
-# ── Gmail + Google Calendar (OAuth) ───────────────────────────────────────────
+# ── Envío de email (Resend) ───────────────────────────────────────────────────
+# API key desde https://resend.com/api-keys
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
+# Remitente verificado en Resend, ej: "Agente Turismo <itinerario@primesource.live>"
+RESEND_FROM = os.getenv("RESEND_FROM", "")
+
+# ── Google Calendar (OAuth) ───────────────────────────────────────────────────
 GOOGLE_OAUTH_CLIENT_SECRETS = os.getenv(
     "GOOGLE_OAUTH_CLIENT_SECRETS", "./credentials/credentials.json"
 )

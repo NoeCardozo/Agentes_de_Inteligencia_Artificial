@@ -37,7 +37,6 @@ from config.settings import (
     AUTO_DELIVER_ON_APPROVE,
     MAX_JUDGE_RETRIES,
     SYSTEM_PROMPT_BASE,
-    USER_EMAIL,
 )
 from guardrails.guardrails import apply_input_guardrails, apply_output_guardrails
 from integrations.google_tools import DELIVERY_TOOLS
@@ -47,9 +46,9 @@ from integrations.google_workspace import (
     events_from_itinerary_via_llm,
     extract_events_json,
     oauth_configured,
-    send_email,
     strip_events_json,
 )
+from integrations.resend_email import find_email, resend_configured, send_email
 from mcp.mcp_client import (
     ALL_MCP_TOOLS,
     tool_actividades,
@@ -100,17 +99,24 @@ Cómo trabajar:
    entrega-viaje cuando corresponda al pedido.
 5. Cuando armes un itinerario completo día a día, al final agregá exactamente:
    EVENTS_JSON:[{{"title":"...","start":"YYYY-MM-DDTHH:MM:SS","end":"...","location":"...","description":"..."}}]
-   (horarios locales Argentina). Si el usuario pide enviar el viaje o ya aprobó,
-   usá tool_enviar_email y tool_crear_eventos_calendario.
-6. Si falta el email del usuario, pedilo. Email por defecto del entorno: {user_email}.
+   (horarios locales Argentina).
+6. EMAIL DE ENTREGA (obligatorio): el itinerario se envía SOLO a la dirección que
+   el usuario indique en el chat. Cuando presentes el plan día a día, preguntá
+   explícitamente: "¿A qué email querés que te envíe el itinerario?".
+   NUNCA inventes ni asumas un email. Cuando el usuario diga el email y pida enviarlo
+   (o tras aprobación HITL), usá tool_enviar_email con ese `to` y el itinerario
+   COMPLETO día a día (desde Día 1). El calendario de Google usa la cuenta OAuth
+   configurada en el servidor; tool_crear_eventos_calendario no depende del email
+   de entrega.
 7. Respondé siempre en español, claro y accionable.
 8. NUNCA narres tu proceso interno: no digas que vas a leer skills, consultar tools,
    actualizar todos, ni pegues dumps de actividades crudas antes del itinerario.
    Al usuario solo mostrá la respuesta final útil (preguntas claras o el itinerario).
 9. Si ya tenés destino, fechas, viajeros y presupuesto, COMPLETÁ el itinerario en este
-   mismo turno (consultá tools y respondé con el plan día a día). Nunca digas
-   "te aviso cuando esté listo" ni dejes al usuario esperando.
-""".format(user_email=USER_EMAIL or "(no configurado — pedilo)")
+   mismo turno (consultá tools y respondé con el plan día a día completo: Día 1, Día 2…).
+   NUNCA digas "te aviso cuando esté listo", "voy a encargarme" ni dejes al usuario
+   esperando. Si falló un subagente, reintentá vos mismo con las tools y entregá el plan.
+"""
 
 
 @tool
@@ -426,20 +432,60 @@ def append_agent_turn(messages: list[dict], res: dict, skip_human: bool = True) 
     return chosen["content"]
 
 
-def _looks_like_itinerary(text: str) -> bool:
-    """Solo planes día a día concretos, no menciones sueltas de 'itinerario'."""
-    lower = (text or "").lower()
-    day_markers = (
-        "día 1", "dia 1", "día 2", "dia 2", "día 3", "dia 3",
-        "noche 1", "día 4", "dia 4", "día 5", "dia 5", "día 6", "dia 6",
-    )
-    if any(m in lower for m in day_markers):
+_DAY_HEADER_RE = re.compile(
+    r"(?im)(?:^|\n)\s*(?:#{1,3}\s*)?(?:\*\*)?d[ií]a\s*(\d+)\b"
+)
+
+_META_PLANNING_RE = re.compile(
+    r"(?is)("
+    r"te avisaré|te aviso cuando|cuando tenga la propuesta|"
+    r"voy a encargarme|ahora mismo voy a|"
+    r"no puedo invocar|mis disculpas|"
+    r"utilizar el subagente|invocar al subagente"
+    r")"
+)
+
+
+def _day_numbers(text: str) -> set[int]:
+    return {int(m.group(1)) for m in _DAY_HEADER_RE.finditer(text or "")}
+
+
+def _is_meta_planning_message(text: str) -> bool:
+    """Mensajes de proceso / placeholder que NO son un itinerario entregable."""
+    if not text or not text.strip():
         return True
-    strong = (
-        "plan día a día", "plan dia a dia", "itinerario detallado",
-        "costo acumulado", "desglose de costos",
-    )
-    return sum(1 for m in strong if m in lower) >= 1
+    if _day_numbers(text):
+        return False
+    return bool(_META_PLANNING_RE.search(text))
+
+
+def _looks_like_itinerary(text: str) -> bool:
+    """
+    Solo planes día a día concretos (con Día 1…).
+    No alcanza mencionar 'itinerario detallado' ni mensajes de 'voy a planificar'.
+    """
+    if not text or _is_meta_planning_message(text):
+        return False
+    days = _day_numbers(text)
+    if 1 not in days:
+        return False
+    # Ideal: al menos 2 días. Viaje de 1 día: Día 1 + contenido sustancial.
+    if len(days) >= 2:
+        return True
+    return len(text.strip()) >= 600
+
+
+def _find_best_itinerary_text(messages: list[dict], fallback: str = "") -> str:
+    """Prefiere el último mensaje AI del chat que sea un itinerario real."""
+    for m in reversed(messages):
+        if m.get("type") != "ai":
+            continue
+        content = m.get("content") or ""
+        if _looks_like_itinerary(content):
+            return content
+    if _looks_like_itinerary(fallback):
+        return fallback
+    return ""
 
 
 def _is_clarifying_reply(text: str) -> bool:
@@ -449,7 +495,7 @@ def _is_clarifying_reply(text: str) -> bool:
     """
     lower = (text or "").lower()
     # Plan día a día real → no es aclaración
-    if any(m in lower for m in ("día 1", "dia 1", "día 2", "dia 2", "día 3", "dia 3")):
+    if _looks_like_itinerary(text):
         return False
 
     ask_markers = (
@@ -459,6 +505,7 @@ def _is_clarifying_reply(text: str) -> bool:
         "¿cuántos", "cuantos", "fechas", "presupuesto", "viajarán", "viajaran",
         "para poder ayudarte", "faltan", "me falta", "te parece bien",
         "otras fechas", "házmelo saber", "hazmelo saber",
+        "a qué email", "a que email", "qué email", "que email",
     )
     question_marks = lower.count("?")
     if question_marks >= 1 and any(m in lower for m in ask_markers):
@@ -665,67 +712,129 @@ def run_agent_and_judge(
     return messages, visible_ai
 
 
-def deliver_itinerary_on_approve(itinerary_text: str) -> str:
+def _detect_recipient(messages: list[dict]) -> str:
+    """Solo emails que el usuario escribió en el chat (nunca un default silencioso)."""
+    for m in reversed(messages):
+        if m.get("type") != "human":
+            continue
+        found = find_email(m.get("content") or "")
+        if found:
+            return found
+    return ""
+
+
+def _guess_destination(text: str) -> str:
+    lower = (text or "").lower()
+    for name in (
+        "bariloche", "mendoza", "ushuaia", "salta", "iguazú", "iguazu",
+        "el calafate", "puerto madryn", "córdoba", "cordoba", "cafayate",
+    ):
+        if name in lower:
+            return name.title().replace("Iguazu", "Iguazú").replace("Cordoba", "Córdoba")
+    return ""
+
+
+def deliver_itinerary_on_approve(
+    itinerary_text: str,
+    messages: list[dict],
+    *,
+    recipient: str | None = None,
+) -> str:
     """
-    Envía el itinerario por Gmail y crea eventos en Calendar.
-    Retorna un resumen para mostrar en el chat.
+    Envía el itinerario por email (Resend → email que indicó el usuario)
+    y crea eventos en Calendar (OAuth Google del servidor).
     """
     if not AUTO_DELIVER_ON_APPROVE:
         return ""
-    if not oauth_configured():
+
+    body = _find_best_itinerary_text(messages, itinerary_text)
+    if not body:
         return (
-            "Entrega automática omitida: falta OAuth Google "
+            "Respuesta aprobada, pero no hay un itinerario día a día completo "
+            "para enviar. Pedile al agente que regenere el plan con Día 1, Día 2…"
+        )
+
+    lines: list[str] = []
+    meta = load_hitl_meta()
+    pending = meta.get("pending_delivery") or {}
+    clean_body = polish_agent_reply(strip_events_json(body))
+    dest_name = _guess_destination(clean_body)
+    html_body = itinerary_to_email_html(clean_body, destination=dest_name)
+
+    events = (
+        pending.get("events")
+        or meta.get("pending_events")
+        or extract_events_json(body)
+    )
+    calendar_done = bool(pending.get("calendar_done"))
+    waiting_email = False
+
+    # ── Email (Resend) — solo al email que dijo el usuario ─────────────
+    to_addr = (recipient or "").strip() or _detect_recipient(messages)
+    if not resend_configured():
+        lines.append(
+            "Email omitido: configurá RESEND_API_KEY y RESEND_FROM en .env (ver https://resend.com)."
+        )
+    elif not to_addr:
+        waiting_email = True
+        lines.append(
+            "Para enviar el itinerario por correo, escribí en el chat el email de destino "
+            "(ej. juan@gmail.com)."
+        )
+    else:
+        try:
+            sent = send_email(
+                to_addr,
+                "Tu itinerario de viaje — Agente Turismo Argentina",
+                html_body,
+            )
+            lines.append(f"Email enviado a {sent['to']}.")
+        except Exception as exc:
+            waiting_email = True
+            lines.append(f"No se pudo enviar el email: {exc}")
+
+    # ── Calendario (Google OAuth de la cuenta configurada) ─────────────
+    if calendar_done:
+        pass
+    elif not oauth_configured():
+        lines.append(
+            "Calendario omitido: falta OAuth Google "
             "(credentials/credentials.json + python scripts/google_oauth_setup.py)."
         )
-    if not USER_EMAIL:
-        return (
-            "Entrega automática omitida: configurá USER_EMAIL en .env "
-            "o pedile al agente que envíe el correo con tu email."
-        )
-    if not _looks_like_itinerary(itinerary_text):
-        return "Respuesta aprobada (no parece un itinerario completo; no se envió email/calendario)."
-
-    lines = []
-    meta = load_hitl_meta()
-    clean_body = polish_agent_reply(strip_events_json(itinerary_text))
-    html_body = itinerary_to_email_html(clean_body, destination="Bariloche" if "bariloche" in clean_body.lower() else "")
-
-    try:
-        sent = send_email(
-            USER_EMAIL,
-            "Tu itinerario de viaje — Agente Turismo Argentina",
-            html_body,
-            html=True,
-        )
-        lines.append(f"Email enviado a {sent['to']}.")
-    except Exception as exc:
-        lines.append(f"No se pudo enviar el email: {exc}")
-
-    events = meta.get("pending_events") or extract_events_json(itinerary_text)
-    if not events:
-        try:
-            events = events_from_itinerary_via_llm(clean_body)
-        except Exception as exc:
-            lines.append(f"No se pudieron inferir eventos: {exc}")
-            events = []
-
-    if events:
-        try:
-            result = create_calendar_events(events)
-            lines.append(
-                f"Google Calendar: {result['created']} evento(s) creado(s)"
-                + (f", {result['failed']} fallido(s)" if result.get("failed") else "")
-                + "."
-            )
-            for ev in (result.get("events") or [])[:5]:
-                if ev.get("htmlLink"):
-                    lines.append(f"  · {ev.get('summary')}: {ev['htmlLink']}")
-        except Exception as exc:
-            lines.append(f"No se pudieron crear eventos en Calendar: {exc}")
+        calendar_done = True
     else:
-        lines.append("No se encontraron eventos estructurados para el calendario.")
+        if not events:
+            try:
+                events = events_from_itinerary_via_llm(clean_body)
+            except Exception as exc:
+                lines.append(f"No se pudieron inferir eventos: {exc}")
+                events = []
+        if events:
+            try:
+                result = create_calendar_events(events)
+                lines.append(
+                    f"Google Calendar: {result['created']} evento(s) creado(s)"
+                    + (f", {result['failed']} fallido(s)" if result.get("failed") else "")
+                    + "."
+                )
+                for ev in (result.get("events") or [])[:5]:
+                    if ev.get("htmlLink"):
+                        lines.append(f"  · {ev.get('summary')}: {ev['htmlLink']}")
+            except Exception as exc:
+                lines.append(f"No se pudieron crear eventos en Calendar: {exc}")
+        else:
+            lines.append("No se encontraron eventos estructurados para el calendario.")
+        calendar_done = True
 
     meta["pending_events"] = []
+    if waiting_email:
+        meta["pending_delivery"] = {
+            "itinerary": body,
+            "events": events or [],
+            "calendar_done": calendar_done,
+        }
+    else:
+        meta.pop("pending_delivery", None)
     save_hitl_meta(meta)
     return "\n".join(lines)
 
@@ -740,7 +849,7 @@ def handle_hitl_approve(messages: list[dict]) -> list[dict]:
     meta["judge_retries"] = 0
     save_hitl_meta(meta)
 
-    delivery = deliver_itinerary_on_approve(itinerary_text)
+    delivery = deliver_itinerary_on_approve(itinerary_text, messages)
     if delivery:
         messages.append({
             "type": "ai",
@@ -748,6 +857,29 @@ def handle_hitl_approve(messages: list[dict]) -> list[dict]:
             "status": "info",
         })
     return messages
+
+
+def try_complete_pending_delivery(messages: list[dict], user_input: str) -> str | None:
+    """
+    Si hay un itinerario aprobado esperando email y el usuario escribió uno,
+    completa la entrega. Retorna resumen o None si no aplica.
+    """
+    meta = load_hitl_meta()
+    pending = meta.get("pending_delivery")
+    if not pending:
+        return None
+    email = find_email(user_input or "")
+    if not email:
+        return (
+            "Todavía necesito el email de destino para enviar el itinerario. "
+            "Escribí una dirección válida (ej. nombre@gmail.com)."
+        )
+    itinerary = pending.get("itinerary") or ""
+    # Marcar calendario ya hecho para no duplicar eventos
+    if pending.get("calendar_done"):
+        meta["pending_delivery"] = {**pending, "calendar_done": True}
+        save_hitl_meta(meta)
+    return deliver_itinerary_on_approve(itinerary, messages, recipient=email)
 
 
 def handle_hitl_escalate(messages: list[dict]) -> list[dict]:
@@ -929,6 +1061,27 @@ def index_post():
             max_retries=MAX_JUDGE_RETRIES,
             judge_retries=load_hitl_meta().get("judge_retries", 0),
         )
+
+    # Si hay itinerario aprobado esperando email de destino, completar entrega
+    if load_hitl_meta().get("pending_delivery"):
+        messages.append({"type": "human", "content": user_input})
+        delivery = try_complete_pending_delivery(messages, user_input)
+        if delivery:
+            messages.append({
+                "type": "ai",
+                "content": f"Entrega del viaje:\n{delivery}",
+                "status": "info",
+            })
+            save_messages(messages)
+            return render_template(
+                "index.html",
+                messages=messages,
+                show_tool_messages=show_tool_messages,
+                thread_id=thread_id,
+                pending_hitl=False,
+                max_retries=MAX_JUDGE_RETRIES,
+                judge_retries=0,
+            )
 
     messages, _ = run_agent_and_judge(user_input, thread_id, messages)
     save_messages(messages)
